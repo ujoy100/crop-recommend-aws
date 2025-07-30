@@ -1,0 +1,56 @@
+name: Deploy to AWS Elastic Beanstalk
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: eu-central-1
+  APPLICATION_NAME: crop-recommender-app
+  ENVIRONMENT_NAME: crop-recommender-env
+  DOCKER_IMAGE_NAME: crop-recommender-app
+  ECR_REPOSITORY: crop-recommender-repo
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | \
+          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+      - name: Build and tag Docker image
+        run: |
+          docker build -t $DOCKER_IMAGE_NAME .
+          docker tag $DOCKER_IMAGE_NAME:latest \
+          ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+
+      - name: Push Docker image to Amazon ECR
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
+
+      - name: Deploy to Elastic Beanstalk
+        run: |
+          zip -r app.zip Dockerrun.aws.json
+          aws elasticbeanstalk create-application-version \
+            --application-name $APPLICATION_NAME \
+            --version-label "ver-${{ github.run_number }}" \
+            --source-bundle S3Bucket=$APPLICATION_NAME,S3Key=app.zip
+
+          aws elasticbeanstalk update-environment \
+            --application-name $APPLICATION_NAME \
+            --environment-name $ENVIRONMENT_NAME \
+            --version-label "ver-${{ github.run_number }}"
