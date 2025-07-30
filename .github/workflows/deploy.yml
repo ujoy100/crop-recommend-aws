@@ -6,12 +6,12 @@ on:
       - main
 
 env:
-  AWS_REGION: eu-central-1              # Your AWS region
+  AWS_REGION: eu-central-1               # Update to your AWS region
   APPLICATION_NAME: crop-recommender-app
   ENVIRONMENT_NAME: crop-recommender-env
   DOCKER_IMAGE_NAME: crop-recommender-app
   ECR_REPOSITORY: crop-recommender-repo
-  AWS_ACCOUNT_ID: 610495549917          # Replace with your AWS account ID
+  S3_BUCKET: crop-recommender-app-ujoy100 # Use your existing unique S3 bucket
 
 jobs:
   deploy:
@@ -28,41 +28,33 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Step 1: Ensure ECR repository exists (creates if missing)
-      - name: Create ECR repository if not exists
+      # ✅ Step 1: Create S3 bucket if it does not exist
+      - name: Ensure S3 bucket exists
         run: |
-          aws ecr describe-repositories --repository-names $ECR_REPOSITORY --region $AWS_REGION || \
-          aws ecr create-repository --repository-name $ECR_REPOSITORY --region $AWS_REGION
+          aws s3api head-bucket --bucket $S3_BUCKET 2>/dev/null || \
+          aws s3 mb s3://$S3_BUCKET --region $AWS_REGION
 
-      # Step 2: Log in to Amazon ECR
-      - name: Log in to Amazon ECR
-        run: |
-          aws ecr get-login-password --region $AWS_REGION | \
-          docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-
-      # Step 3: Build and tag Docker image
-      - name: Build and tag Docker image
-        run: |
-          docker build -t $DOCKER_IMAGE_NAME .
-          docker tag $DOCKER_IMAGE_NAME:latest \
-          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
-
-      # Step 4: Push Docker image to Amazon ECR
-      - name: Push Docker image to Amazon ECR
-        run: |
-          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
-
-      # Step 5: Deploy to Elastic Beanstalk
-      - name: Deploy to Elastic Beanstalk
+      # ✅ Step 2: Zip project files (excluding venv and git)
+      - name: Zip project
         run: |
           zip -r app.zip . -x "*.git*" "venv/*"
-          aws s3 cp app.zip s3://$APPLICATION_NAME/app-${{ github.run_number }}.zip
 
+      # ✅ Step 3: Upload to S3
+      - name: Upload to S3
+        run: |
+          aws s3 cp app.zip s3://$S3_BUCKET/app-${{ github.run_number }}.zip
+
+      # ✅ Step 4: Create a new Elastic Beanstalk Application Version
+      - name: Create new EB application version
+        run: |
           aws elasticbeanstalk create-application-version \
             --application-name $APPLICATION_NAME \
             --version-label "ver-${{ github.run_number }}" \
-            --source-bundle S3Bucket=$APPLICATION_NAME,S3Key=app-${{ github.run_number }}.zip
+            --source-bundle S3Bucket=$S3_BUCKET,S3Key=app-${{ github.run_number }}.zip
 
+      # ✅ Step 5: Deploy new version to environment
+      - name: Deploy to Elastic Beanstalk
+        run: |
           aws elasticbeanstalk update-environment \
             --application-name $APPLICATION_NAME \
             --environment-name $ENVIRONMENT_NAME \
