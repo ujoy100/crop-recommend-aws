@@ -91,7 +91,7 @@ jobs:
           if [ $delete_count -gt 0 ]; then
             echo "$versions" | head -n $delete_count | while read ver; do
               echo "Deleting old EB version: $ver"
-              # Try to delete source bundle, but ignore errors if S3 object is missing
+              # Try deleting version and source bundle, ignore S3 deletion errors
               aws elasticbeanstalk delete-application-version \
                 --application-name "$APPLICATION_NAME" \
                 --version-label "$ver" \
