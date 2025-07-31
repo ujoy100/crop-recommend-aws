@@ -76,12 +76,12 @@ jobs:
                 aws s3 rm s3://$S3_BUCKET/$file
               done
 
-       # ✅ Step 9: Cleanup old EB application versions (keep last 5)
+      # ✅ Step 9: Cleanup old EB application versions (keep last 5)
       - name: Cleanup old EB application versions
         run: |
           echo "Cleaning old EB application versions, keeping last 5..."
           versions=$(aws elasticbeanstalk describe-application-versions \
-            --application-name $APPLICATION_NAME \
+            --application-name "$APPLICATION_NAME" \
             --query 'ApplicationVersions[*].VersionLabel' \
             --output text | tr '\t' '\n' | sort)
 
@@ -91,12 +91,15 @@ jobs:
           if [ $delete_count -gt 0 ]; then
             echo "$versions" | head -n $delete_count | while read ver; do
               echo "Deleting old EB version: $ver"
+              # Try to delete source bundle, but ignore errors if S3 object is missing
               aws elasticbeanstalk delete-application-version \
                 --application-name "$APPLICATION_NAME" \
                 --version-label "$ver" \
-                --delete-source-bundle
+                --delete-source-bundle || \
+              aws elasticbeanstalk delete-application-version \
+                --application-name "$APPLICATION_NAME" \
+                --version-label "$ver"
             done
           else
             echo "No old EB versions to delete. Total versions: $total"
           fi
-
