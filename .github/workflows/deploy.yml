@@ -31,7 +31,7 @@ jobs:
       # ✅ Step 3: Create deployment zip (includes Dockerfile)
       - name: Create deployment package
         run: |
-          zip -r deploy.zip Dockerfile app.py requirements.txt static templates RF_model.pkl
+          zip -r deploy.zip Dockerfile main.py requirements.txt static templates RF_model.pkl
 
       # ✅ Step 4: Ensure S3 bucket exists
       - name: Ensure S3 bucket exists
