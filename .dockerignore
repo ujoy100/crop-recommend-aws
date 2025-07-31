@@ -1,6 +1,7 @@
 venv/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.env
+*.zip
+*.bak
+*.json  # if not needed inside container
+.git
+.github
