@@ -1,4 +1,4 @@
-name: Deploy to AWS Elastic Beanstalk
+name: Deploy to AWS Elastic Beanstalk (Dockerfile, AL2023)
 
 on:
   push:
@@ -9,7 +9,6 @@ env:
   AWS_REGION: eu-central-1
   APPLICATION_NAME: crop-recommender-app
   ENVIRONMENT_NAME: crop-recommender-env
-  ECR_REPOSITORY: crop-recommender-repo
   S3_BUCKET: crop-recommender-app-ujoy100
 
 jobs:
@@ -29,48 +28,23 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ✅ Step 3: Authenticate Docker with ECR
-      - name: Authenticate Docker with ECR
-        env:
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-        run: |
-          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-
-      # ✅ Step 4: Build and Push Docker Image to ECR
-      - name: Build and Push Docker Image
-        env:
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-        run: |
-          IMAGE_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${GITHUB_RUN_NUMBER}
-          docker build -t $IMAGE_URI .
-          docker push $IMAGE_URI
-          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
-
-      # ✅ Step 5: Clean up any old Dockerrun and Generate new one
-      - name: Generate Dockerrun.aws.json
-        run: |
-          rm -f Dockerrun.aws.json
-          sed "s|<IMAGE_URI>|$IMAGE_URI|g" Dockerrun.aws.json.template > Dockerrun.aws.json
-          echo "Generated Dockerrun.aws.json:"
-          cat Dockerrun.aws.json
-
-      # ✅ Step 6: Create deployment package (Dockerrun only)
+      # ✅ Step 3: Create deployment zip (includes Dockerfile)
       - name: Create deployment package
         run: |
-          zip deploy.zip Dockerrun.aws.json
+          zip -r deploy.zip Dockerfile app.py requirements.txt static templates RF_model.pkl
 
-      # ✅ Step 7: Ensure S3 bucket exists
+      # ✅ Step 4: Ensure S3 bucket exists
       - name: Ensure S3 bucket exists
         run: |
           aws s3api head-bucket --bucket $S3_BUCKET 2>/dev/null || \
           aws s3 mb s3://$S3_BUCKET --region $AWS_REGION
 
-      # ✅ Step 8: Upload package to S3
+      # ✅ Step 5: Upload zip to S3
       - name: Upload to S3
         run: |
           aws s3 cp deploy.zip s3://$S3_BUCKET/deploy-${GITHUB_RUN_NUMBER}.zip
 
-      # ✅ Step 9: Create new EB Application Version
+      # ✅ Step 6: Create Elastic Beanstalk Application Version
       - name: Create EB Application Version
         run: |
           aws elasticbeanstalk create-application-version \
@@ -78,7 +52,7 @@ jobs:
             --version-label "ver-${GITHUB_RUN_NUMBER}" \
             --source-bundle S3Bucket=$S3_BUCKET,S3Key=deploy-${GITHUB_RUN_NUMBER}.zip
 
-      # ✅ Step 10: Deploy to Elastic Beanstalk
+      # ✅ Step 7: Deploy new version to environment
       - name: Deploy to Elastic Beanstalk
         run: |
           aws elasticbeanstalk update-environment \
