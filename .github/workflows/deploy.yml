@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: # ✅ Allows manual deployment trigger
 
 env:
   AWS_REGION: eu-central-1
@@ -47,13 +46,15 @@ jobs:
           docker push $IMAGE_URI
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
-      # ✅ Step 5: Generate Dockerrun.aws.json dynamically
+      # ✅ Step 5: Clean up any old Dockerrun and Generate new one
       - name: Generate Dockerrun.aws.json
         run: |
+          rm -f Dockerrun.aws.json
           sed "s|<IMAGE_URI>|$IMAGE_URI|g" Dockerrun.aws.json.template > Dockerrun.aws.json
+          echo "Generated Dockerrun.aws.json:"
           cat Dockerrun.aws.json
 
-      # ✅ Step 6: Create deployment package
+      # ✅ Step 6: Create deployment package (Dockerrun only)
       - name: Create deployment package
         run: |
           zip deploy.zip Dockerrun.aws.json
@@ -84,25 +85,3 @@ jobs:
             --application-name $APPLICATION_NAME \
             --environment-name $ENVIRONMENT_NAME \
             --version-label "ver-${GITHUB_RUN_NUMBER}"
-
-      # ✅ Step 11: Clean up old EB versions (keep last 5)
-      - name: Clean up old EB versions
-        run: |
-          OLD_VERSIONS=$(aws elasticbeanstalk describe-application-versions \
-            --application-name $APPLICATION_NAME \
-            --query "ApplicationVersions[?VersionLabel!='ver-${GITHUB_RUN_NUMBER}'].VersionLabel" \
-            --output text | tr '\t' '\n' | sort)
-
-          COUNT=$(echo "$OLD_VERSIONS" | wc -l)
-          if [ $COUNT -gt 5 ]; then
-            DELETE=$(echo "$OLD_VERSIONS" | head -n $(($COUNT-5)))
-            for ver in $DELETE; do
-              echo "Deleting old version $ver"
-              aws elasticbeanstalk delete-application-version \
-                --application-name $APPLICATION_NAME \
-                --version-label $ver \
-                --delete-source-bundle
-            done
-          else
-            echo "No cleanup required."
-          fi
