@@ -1,4 +1,4 @@
-name: Deploy to AWS Elastic Beanstalk (Dockerfile, AL2023)
+name: Deploy to AWS Elastic Beanstalk
 
 on:
   push:
@@ -28,10 +28,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ✅ Step 3: Create deployment zip (includes Dockerfile)
+      # ✅ Step 3: Create deployment package (zip entire project)
       - name: Create deployment package
         run: |
-          zip -r deploy.zip Dockerfile main.py requirements.txt static templates RF_model.pkl
+          zip -r deploy.zip * .[^.]* \
+            -x "*.git*" \
+            -x "venv/*" \
+            -x "__pycache__/*"
 
       # ✅ Step 4: Ensure S3 bucket exists
       - name: Ensure S3 bucket exists
@@ -39,12 +42,12 @@ jobs:
           aws s3api head-bucket --bucket $S3_BUCKET 2>/dev/null || \
           aws s3 mb s3://$S3_BUCKET --region $AWS_REGION
 
-      # ✅ Step 5: Upload zip to S3
+      # ✅ Step 5: Upload deployment zip to S3
       - name: Upload to S3
         run: |
           aws s3 cp deploy.zip s3://$S3_BUCKET/deploy-${GITHUB_RUN_NUMBER}.zip
 
-      # ✅ Step 6: Create Elastic Beanstalk Application Version
+      # ✅ Step 6: Create EB Application Version
       - name: Create EB Application Version
         run: |
           aws elasticbeanstalk create-application-version \
@@ -52,10 +55,47 @@ jobs:
             --version-label "ver-${GITHUB_RUN_NUMBER}" \
             --source-bundle S3Bucket=$S3_BUCKET,S3Key=deploy-${GITHUB_RUN_NUMBER}.zip
 
-      # ✅ Step 7: Deploy new version to environment
+      # ✅ Step 7: Deploy new version to Elastic Beanstalk
       - name: Deploy to Elastic Beanstalk
         run: |
           aws elasticbeanstalk update-environment \
             --application-name $APPLICATION_NAME \
             --environment-name $ENVIRONMENT_NAME \
             --version-label "ver-${GITHUB_RUN_NUMBER}"
+
+      # ✅ Step 8: Cleanup old S3 deployments (keep last 3)
+      - name: Cleanup old S3 deployments
+        run: |
+          echo "Cleaning old S3 zips, keeping last 3..."
+          aws s3 ls s3://$S3_BUCKET/ \
+            | sort \
+            | head -n -3 \
+            | awk '{print $4}' \
+            | while read file; do
+                echo "Deleting old S3 zip: $file"
+                aws s3 rm s3://$S3_BUCKET/$file
+              done
+
+      # ✅ Step 9: Cleanup old EB application versions (keep last 5)
+      - name: Cleanup old EB application versions
+        run: |
+          echo "Cleaning old EB application versions, keeping last 5..."
+          versions=$(aws elasticbeanstalk describe-application-versions \
+            --application-name $APPLICATION_NAME \
+            --query 'ApplicationVersions[*].VersionLabel' \
+            --output text | tr '\t' '\n' | sort)
+
+          total=$(echo "$versions" | wc -l)
+          delete_count=$((total-5))
+
+          if [ $delete_count -gt 0 ]; then
+            echo "$versions" | head -n $delete_count | while read ver; do
+              echo "Deleting old EB version: $ver"
+              aws elasticbeanstalk delete-application-version \
+                --application-name $APPLICATION_NAME \
+                --version-label $ver \
+                --delete-source-bundle
+            done
+          else
+            echo "No old EB versions to delete. Total versions: $total"
+          fi
